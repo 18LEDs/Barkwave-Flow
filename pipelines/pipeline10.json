@@ -1,0 +1,4 @@
+{
+  "name": "pipeline10",
+  "filter": "source:app10"
+}
