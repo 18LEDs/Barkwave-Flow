@@ -1,5 +1,6 @@
 terraform {
   required_version = ">= 1.0"
+  backend "pg" {}
   required_providers {
     datadog = {
       source  = "DataDog/datadog"
