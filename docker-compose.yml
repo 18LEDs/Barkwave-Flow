@@ -1,0 +1,57 @@
+version: "3.9"
+
+services:
+  gitea:
+    image: gitea/gitea:1.21
+    container_name: gitea
+    restart: unless-stopped
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+      - GITEA__server__ROOT_URL=${GITEA_ROOT_URL:-http://localhost:3000/}
+      - GITEA__server__SSH_PORT=222
+      - GITEA__actions__ENABLED=true
+    volumes:
+      - gitea-data:/data
+    ports:
+      - "3000:3000"
+      - "222:22"
+
+  gitea-runner:
+    image: gitea/act_runner:latest
+    container_name: gitea-runner
+    depends_on:
+      - gitea
+    environment:
+      - GITEA_INSTANCE_URL=${GITEA_ROOT_URL:-http://gitea:3000/}
+      - GITEA_RUNNER_REGISTRATION_TOKEN=${GITEA_RUNNER_REGISTRATION_TOKEN}
+      - GITEA_RUNNER_NAME=${GITEA_RUNNER_NAME:-local-runner}
+      - GITEA_RUNNER_LABELS=${GITEA_RUNNER_LABELS:-ubuntu-latest:docker://catthehacker/ubuntu:act-latest}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - gitea-runner-data:/data
+    entrypoint: ["/bin/sh","-lc"]
+    command: >-
+      "act_runner register --no-interactive
+        --instance ${GITEA_INSTANCE_URL}
+        --token ${GITEA_RUNNER_REGISTRATION_TOKEN}
+        --name ${GITEA_RUNNER_NAME}
+        --labels ${GITEA_RUNNER_LABELS}
+      && exec act_runner daemon"
+
+  consul:
+    image: hashicorp/consul:1.16
+    container_name: consul
+    command: >-
+      agent -server -bootstrap-expect=1 -ui
+      -client=0.0.0.0 -bind=0.0.0.0
+    ports:
+      - "8500:8500"
+    volumes:
+      - consul-data:/consul/data
+
+volumes:
+  gitea-data: {}
+  gitea-runner-data: {}
+  consul-data: {}
+

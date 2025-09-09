@@ -1,0 +1,90 @@
+name: Drift Detection
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  drift-nonprod:
+    name: Drift (nonprod)
+    runs-on: ubuntu-latest
+    container:
+      image: hashicorp/terraform:1.7.5
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Init (Consul backend)
+        run: |
+          terraform init \
+            -backend-config="address=${{ secrets.CONSUL_HTTP_ADDR_NONPROD }}" \
+            -backend-config="path=${{ secrets.CONSUL_BACKEND_PATH_NONPROD }}" \
+            -backend-config="scheme=${{ secrets.CONSUL_SCHEME_NONPROD }}" \
+            -backend-config="access_token=${{ secrets.CONSUL_HTTP_TOKEN_NONPROD }}" \
+            -backend-config="lock=true"
+
+      - name: Plan (detailed exit code)
+        id: plan
+        env:
+          TF_VAR_datadog_api_key: ${{ secrets.DATADOG_API_KEY_NONPROD }}
+          TF_VAR_datadog_app_key: ${{ secrets.DATADOG_APP_KEY_NONPROD }}
+        run: |
+          set +e
+          terraform plan -input=false -detailed-exitcode -no-color > plan.out 2>&1
+          status=$?
+          echo "exitcode=$status" >> $GITHUB_OUTPUT
+          echo "--- plan output ---"
+          tail -n +1 plan.out || true
+          exit 0
+
+      - name: Fail on drift
+        if: steps.plan.outputs.exitcode == '2'
+        run: |
+          echo "Drift detected in nonprod (terraform plan exit code 2)." >&2
+          exit 2
+
+  drift-prod:
+    name: Drift (prod)
+    runs-on: ubuntu-latest
+    container:
+      image: hashicorp/terraform:1.7.5
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Init (Consul backend)
+        run: |
+          terraform init \
+            -backend-config="address=${{ secrets.CONSUL_HTTP_ADDR_PROD }}" \
+            -backend-config="path=${{ secrets.CONSUL_BACKEND_PATH_PROD }}" \
+            -backend-config="scheme=${{ secrets.CONSUL_SCHEME_PROD }}" \
+            -backend-config="access_token=${{ secrets.CONSUL_HTTP_TOKEN_PROD }}" \
+            -backend-config="lock=true"
+
+      - name: Plan (detailed exit code)
+        id: plan
+        env:
+          TF_VAR_datadog_api_key: ${{ secrets.DATADOG_API_KEY_PROD }}
+          TF_VAR_datadog_app_key: ${{ secrets.DATADOG_APP_KEY_PROD }}
+        run: |
+          set +e
+          terraform plan -input=false -detailed-exitcode -no-color > plan.out 2>&1
+          status=$?
+          echo "exitcode=$status" >> $GITHUB_OUTPUT
+          echo "--- plan output ---"
+          tail -n +1 plan.out || true
+          exit 0
+
+      - name: Fail on drift
+        if: steps.plan.outputs.exitcode == '2'
+        run: |
+          echo "Drift detected in prod (terraform plan exit code 2)." >&2
+          exit 2
+

@@ -1,0 +1,154 @@
+name: Terraform (nonprod + prod)
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+env:
+  # Datadog provider variables
+  TF_VAR_datadog_api_key: ${{ secrets.DATADOG_API_KEY }}
+  TF_VAR_datadog_app_key: ${{ secrets.DATADOG_APP_KEY }}
+  # Consul backend inputs
+  CONSUL_HTTP_ADDR: ${{ secrets.CONSUL_HTTP_ADDR }}
+  CONSUL_HTTP_TOKEN: ${{ secrets.CONSUL_HTTP_TOKEN }}
+  CONSUL_BACKEND_PATH: ${{ secrets.CONSUL_BACKEND_PATH }}
+  CONSUL_SCHEME: ${{ secrets.CONSUL_SCHEME }}
+
+jobs:
+  plan-nonprod:
+    name: Plan (nonprod)
+    runs-on: ubuntu-latest
+    container:
+      image: hashicorp/terraform:1.7.5
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Init (Consul backend)
+        shell: bash
+        run: |
+          terraform init \
+            -backend-config="address=${{ secrets.CONSUL_HTTP_ADDR_NONPROD }}" \
+            -backend-config="path=${{ secrets.CONSUL_BACKEND_PATH_NONPROD }}" \
+            -backend-config="scheme=${{ secrets.CONSUL_SCHEME_NONPROD }}" \
+            -backend-config="access_token=${{ secrets.CONSUL_HTTP_TOKEN_NONPROD }}" \
+            -backend-config="lock=true"
+
+      - name: Validate
+        run: terraform validate
+
+      - name: Plan
+        env:
+          TF_VAR_datadog_api_key: ${{ secrets.DATADOG_API_KEY_NONPROD }}
+          TF_VAR_datadog_app_key: ${{ secrets.DATADOG_APP_KEY_NONPROD }}
+        run: terraform plan -input=false -no-color -out=tfplan
+
+      - name: Upload plan artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-nonprod
+          path: terraform/tfplan
+
+  plan-prod:
+    name: Plan (prod)
+    runs-on: ubuntu-latest
+    container:
+      image: hashicorp/terraform:1.7.5
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Init (Consul backend)
+        shell: bash
+        run: |
+          terraform init \
+            -backend-config="address=${{ secrets.CONSUL_HTTP_ADDR_PROD }}" \
+            -backend-config="path=${{ secrets.CONSUL_BACKEND_PATH_PROD }}" \
+            -backend-config="scheme=${{ secrets.CONSUL_SCHEME_PROD }}" \
+            -backend-config="access_token=${{ secrets.CONSUL_HTTP_TOKEN_PROD }}" \
+            -backend-config="lock=true"
+
+      - name: Validate
+        run: terraform validate
+
+      - name: Plan
+        env:
+          TF_VAR_datadog_api_key: ${{ secrets.DATADOG_API_KEY_PROD }}
+          TF_VAR_datadog_app_key: ${{ secrets.DATADOG_APP_KEY_PROD }}
+        run: terraform plan -input=false -no-color -out=tfplan
+
+      - name: Upload plan artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-prod
+          path: terraform/tfplan
+
+  apply-nonprod:
+    name: Apply (nonprod)
+    runs-on: ubuntu-latest
+    needs: [ plan-nonprod, plan-prod ]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[apply]')
+    container:
+      image: hashicorp/terraform:1.7.5
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Init (Consul backend)
+        shell: bash
+        run: |
+          terraform init \
+            -backend-config="address=${{ secrets.CONSUL_HTTP_ADDR_NONPROD }}" \
+            -backend-config="path=${{ secrets.CONSUL_BACKEND_PATH_NONPROD }}" \
+            -backend-config="scheme=${{ secrets.CONSUL_SCHEME_NONPROD }}" \
+            -backend-config="access_token=${{ secrets.CONSUL_HTTP_TOKEN_NONPROD }}" \
+            -backend-config="lock=true"
+
+      - name: Apply
+        env:
+          TF_VAR_datadog_api_key: ${{ secrets.DATADOG_API_KEY_NONPROD }}
+          TF_VAR_datadog_app_key: ${{ secrets.DATADOG_APP_KEY_NONPROD }}
+        run: terraform apply -auto-approve -input=false -parallelism=1
+
+  apply-prod:
+    name: Apply (prod)
+    runs-on: ubuntu-latest
+    needs: [ plan-nonprod, plan-prod ]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[apply]')
+    container:
+      image: hashicorp/terraform:1.7.5
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Init (Consul backend)
+        shell: bash
+        run: |
+          terraform init \
+            -backend-config="address=${{ secrets.CONSUL_HTTP_ADDR_PROD }}" \
+            -backend-config="path=${{ secrets.CONSUL_BACKEND_PATH_PROD }}" \
+            -backend-config="scheme=${{ secrets.CONSUL_SCHEME_PROD }}" \
+            -backend-config="access_token=${{ secrets.CONSUL_HTTP_TOKEN_PROD }}" \
+            -backend-config="lock=true"
+
+      - name: Apply
+        env:
+          TF_VAR_datadog_api_key: ${{ secrets.DATADOG_API_KEY_PROD }}
+          TF_VAR_datadog_app_key: ${{ secrets.DATADOG_APP_KEY_PROD }}
+        run: terraform apply -auto-approve -input=false -parallelism=1
